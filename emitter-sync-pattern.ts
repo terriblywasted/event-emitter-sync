@@ -14,6 +14,8 @@ enum EventName {
   EventB = "B",
 }
 
+const EVENT_NAMES = [EventName.EventA, EventName.EventB];
+
 /*
 
   Some utils
@@ -24,14 +26,15 @@ function randomTo(ms: number) {
   return Math.floor(Math.random() * ms);
 }
 
-function triggerRandomly(
+async function triggerRandomly(
   clb: VoidFunction,
   maxFires: number,
   diff: number = 50
 ) {
   if (maxFires <= 0) return;
+  await awaitTimeout(randomTo(diff));
   clb();
-  setTimeout(() => triggerRandomly(clb, maxFires - 1, diff), randomTo(diff));
+  triggerRandomly(clb, maxFires - 1, diff);
 }
 
 async function awaitTimeout(ms: number) {
@@ -91,41 +94,38 @@ function init() {
   const repository = new EventRepository();
   const handler = new EventHandler(emitter, repository);
 
-  let eventsCount: { [k in EventName]: number } = {
+  const eventsCount: { [k in EventName]: number } = {
     [EventName.EventA]: 0,
     [EventName.EventB]: 0,
   };
 
-  const showStats = async () => {
-    emitter.subscribe(
-      EventName.EventA,
-      () => (eventsCount[EventName.EventA] = eventsCount[EventName.EventA] + 1)
-    );
-    emitter.subscribe(
-      EventName.EventB,
-      () => (eventsCount[EventName.EventB] = eventsCount[EventName.EventB] + 1)
-    );
+  async function showStats() {
+    function subscribeAndCountEvent(eventName: EventName) {
+      emitter.subscribe(
+        eventName,
+        () => (eventsCount[eventName] = eventsCount[eventName] + 1)
+      );
+    }
 
-    const compareEventsWithHandlerAndRepository = (eventName: EventName) => {
+    function compareEventWithHandlerAndRepository(eventName: EventName) {
       console.log(
         `Event ${eventName}:`,
         `Fired ${eventsCount[eventName]} times,`,
         `In handler ${handler.getStats(eventName)},`,
         `In repo ${handler.repository.getStats(eventName)},`
       );
-    };
+    }
 
+    EVENT_NAMES.map(subscribeAndCountEvent);
     let syncTimelineSeconds = 100;
 
     while (syncTimelineSeconds > 0) {
       await awaitTimeout(1000);
       console.log("\n----");
-      compareEventsWithHandlerAndRepository(EventName.EventA);
-      compareEventsWithHandlerAndRepository(EventName.EventB);
-
+      EVENT_NAMES.map(compareEventWithHandlerAndRepository);
       syncTimelineSeconds--;
     }
-  };
+  }
 
   showStats();
 }
