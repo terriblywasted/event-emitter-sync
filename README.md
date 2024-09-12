@@ -13,3 +13,24 @@ Check the code first, install deps and the `dev` command could help you with run
 ## Providing results
 
 The best way is to fork this github repo, create pull request with changes and provide a link
+
+## Task completion
+
+### We're expecting
+
+- having equal amount of fired events and handled events
+- equal amount of fired, saved and synced to fake remote repo events every 2 seconds
+
+```ts
+
+// second 1
+----
+Event A: Fired 73 times, In handler 73, In repo 73,
+Event B: Fired 86 times, In handler 86, In repo 86,
+
+// second 2
+----
+Event A: Fired 115 times, In handler 115, In repo // any amount close to or equal to 115,
+Event B: Fired 128 times, In handler 128, In repo // any amount close to or equal to 128,
+
+```
