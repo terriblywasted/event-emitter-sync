@@ -8,7 +8,8 @@ The ultimate aim is to have the `.eventStats` of EventHandler and EventRepositor
 
 ## Run
 
-Check the code first, install deps and the `dev` command could help you with running the code
+Check the code first, install deps and the `dev` command could help you with running the code,
+another `test` command can give you some context as well.
 
 ## Providing results
 
@@ -20,6 +21,7 @@ The best way is to fork this github repo, create pull request with changes and p
 
 - having equal amount of fired events and handled events
 - equal amount of fired, saved and synced to fake remote repo events every 2 seconds
+- OVERALL RESULTS passed
 
 ```ts
 
@@ -32,5 +34,12 @@ Event B: Fired 86 times, In handler 86, In repo 86,
 ----
 Event A: Fired 115 times, In handler 115, In repo // any amount close to or equal to 115,
 Event B: Fired 128 times, In handler 128, In repo // any amount close to or equal to 128,
+
+// results
+
+-–––––- OVERALL RESULTS -–––––-
+Success results passed with 100.00
+Fail results failed with 0.00 (required 0.85)
+
 
 ```
