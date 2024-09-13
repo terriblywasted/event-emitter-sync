@@ -194,31 +194,62 @@ class EventDelayedRepository<T extends string> extends EventStatistics<T> {
 */
 
 class EventHandler extends EventStatistics<EventName> {
-  // Feel free to edit this class
-
   repository: EventRepository;
 
   constructor(emitter: EventEmitter<EventName>, repository: EventRepository) {
     super();
     this.repository = repository;
 
+    // Subscribe to both events
     emitter.subscribe(EventName.EventA, () =>
-      this.repository.saveEventData(EventName.EventA, 1)
+      this.handleEvent(EventName.EventA)
     );
+    emitter.subscribe(EventName.EventB, () =>
+      this.handleEvent(EventName.EventB)
+    );
+  }
+
+  incrementStats(eventName: EventName, incrementBy: number = 1) {
+    this.setStats(eventName, this.getStats(eventName) + incrementBy);
+  }
+
+  async handleEvent(eventName: EventName) {
+    try {
+      const isSuccessfullySaved = await this.repository.saveEventData(
+        eventName
+      );
+      isSuccessfullySaved && this.incrementStats(eventName);
+    } catch (e) {
+      console.error("Error while handling event", e);
+    }
   }
 }
 
 class EventRepository extends EventDelayedRepository<EventName> {
-  // Feel free to edit this class
-
-  async saveEventData(eventName: EventName, _: number) {
+  async saveEventData(
+    eventName: EventName,
+    incrementBy: number = 1
+  ): Promise<boolean> {
     try {
-      await this.updateEventStatsBy(eventName, 1);
+      // Simulate remote stat save
+      await this.updateEventStatsBy(eventName, incrementBy);
+
+      // Successfully saved so return true
+      return true;
     } catch (e) {
-      // const _error = e as EventRepositoryError;
-      // console.warn(error);
+      // Can just return e !== EventRepositoryError.RESPONSE_FAIL
+      // But that way it might be harder to add new errors
+      if (e === EventRepositoryError.RESPONSE_FAIL) {
+        // Based on implementation, with RESPONSE_FAIL data still saved to remote
+        // so we return true
+        return true;
+      }
+
+      // If any other error occurs data is not saved to remote so we return false
+      return false;
     }
   }
 }
 
 init();
+
