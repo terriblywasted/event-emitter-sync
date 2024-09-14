@@ -9,6 +9,3 @@ export class EventStatistics<T extends string> {
     this.eventStats.set(eventName, value);
   }
 }
-
-/* Please do not change the code above this line */
-/* ----–––––––––––––––––––––––––––––––––––––---- */

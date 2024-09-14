@@ -1,11 +1,14 @@
 import { EventEmitter } from "./emitter";
 import { EventStatistics } from "./event-statistics";
 import { awaitTimeout } from "./utils";
+import { logWithTimestamp } from "./logging";
 
-const TEST_PASS_RATE = 0.85;
+const TEST_PASS_RATE = 1.0;
+const ASYNC_TOLERANCE = 1;
 
 export class ResultsTester<T extends string> {
   private eventsCount: Map<T, number> = new Map();
+  private eventFailures: Map<T, number> = new Map();
 
   eventNames: T[];
   emitter: EventEmitter<T>;
@@ -28,7 +31,7 @@ export class ResultsTester<T extends string> {
     this.handler = handler;
     this.repository = repository;
 
-    eventNames.map((eventName) => {
+    eventNames.forEach((eventName) => {
       this.emitter.subscribe(eventName, () => {
         this.eventsCount.set(
           eventName,
@@ -39,74 +42,64 @@ export class ResultsTester<T extends string> {
   }
 
   private checkEventWithHandlerAndRepository(eventName: T): Boolean {
-    const firedEventsCount = this.eventsCount.get(eventName);
-    const handledEventsCount = this.handler.getStats(eventName);
-    const savedEventsCount = this.repository.getStats(eventName);
+    const firedEventsCount = this.eventsCount.get(eventName) || 0;
+    const handledEventsCount = this.handler.getStats(eventName) || 0;
+    const savedEventsCount = this.repository.getStats(eventName) || 0;
+    const failureCount = this.eventFailures.get(eventName) || 0;
 
-    console.log(
-      `Event ${eventName}:`,
-      `Fired ${firedEventsCount} times,`,
-      `In handler ${handledEventsCount},`,
-      `In repo ${savedEventsCount},`
-    );
+    logWithTimestamp(`Checking event ${eventName}`);
+    logWithTimestamp(`Fired: ${firedEventsCount}, Handled: ${handledEventsCount}, Saved: ${savedEventsCount}, Failures: ${failureCount}`);
 
-    if (firedEventsCount !== handledEventsCount) {
-      console.log(
-        `Test for event name "${eventName}" failed: amount of handled events differs`
-      );
+    if (Math.abs(firedEventsCount - handledEventsCount) > ASYNC_TOLERANCE) {
+      logWithTimestamp(`Test for event ${eventName} failed: handled events differ beyond tolerance.`);
+      this.eventFailures.set(eventName, failureCount + 1);
       return false;
     }
 
-    if (savedEventsCount / handledEventsCount < TEST_PASS_RATE) {
-      console.log(
-        `Test for event name "${eventName}" failed: saved events differs more than 15%`
-      );
-      return false;
+    const passRate = savedEventsCount / handledEventsCount;
+    const passed = passRate >= TEST_PASS_RATE;
+
+    if (!passed) {
+      logWithTimestamp(`Test for event ${eventName} failed: pass rate ${passRate.toFixed(2)} (expected ${TEST_PASS_RATE}).`);
+      this.eventFailures.set(eventName, failureCount + 1);
     }
 
-    console.log(`Test for event name "${eventName}" passed`);
-
-    return true;
+    logWithTimestamp(`Test for event ${eventName} ${passed ? 'passed' : 'failed'}.`);
+    return passed;
   }
 
-  async showStats(_syncTimelineSeconds: number = 10): Promise<Map<T, Boolean>> {
-    const checkResults: Map<T, Boolean[]> = new Map();
+  async showStats(syncTimelineSeconds: number = 10): Promise<Map<T, Boolean>> {
     const testPassed: Map<T, Boolean> = new Map();
-
-    let syncTimelineSeconds = _syncTimelineSeconds;
+    const syncInterval = Math.max(Math.floor(syncTimelineSeconds / 5), 1);
 
     console.log("-–––––- INCREMENTAL RESULTS -–––––-");
 
     while (syncTimelineSeconds > 0) {
-      await awaitTimeout(1000);
-      console.log("\n----");
-      this.eventNames.map((e) => {
-        const checkResult = this.checkEventWithHandlerAndRepository(e);
-        checkResults.set(e, [...(checkResults.get(e) || []), checkResult]);
-      });
+      if (syncTimelineSeconds % syncInterval === 0) {
+        await awaitTimeout(1000);
+        this.eventNames.forEach((eventName) => {
+          const result = this.checkEventWithHandlerAndRepository(eventName);
+          testPassed.set(eventName, result);
+        });
+      }
       syncTimelineSeconds--;
     }
 
-    console.log("\n\n-–––––- OVERALL RESULTS -–––––-");
+    console.log("-–––––- OVERALL RESULTS -–––––-");
 
-    for (const [eventName, eventCheckResults] of checkResults.entries()) {
-      const successfulChecks = eventCheckResults.reduce<number>(
-        (acc, result) => (result ? acc + 1 : acc),
-        0
-      );
-      const result = successfulChecks / eventCheckResults.length;
-      const isTestPassed = result >= TEST_PASS_RATE;
-      testPassed.set(eventName, isTestPassed);
+    this.eventNames.forEach((eventName) => {
+      const firedEventsCount = this.eventsCount.get(eventName) || 0;
+      const handledEventsCount = this.handler.getStats(eventName) || 0;
+      const savedEventsCount = this.repository.getStats(eventName) || 0;
 
-      const humanReadableResult = (result * 100).toFixed(2);
-      !isTestPassed
-        ? console.log(
-            `${eventName} results failed with ${humanReadableResult} (required ${TEST_PASS_RATE})`
-          )
-        : console.log(
-            `${eventName} results passed with ${humanReadableResult}`
-          );
-    }
+      if (firedEventsCount === handledEventsCount && savedEventsCount >= TEST_PASS_RATE * handledEventsCount) {
+        logWithTimestamp(`Final Result: ${eventName} PASSED.`);
+        testPassed.set(eventName, true);
+      } else {
+        logWithTimestamp(`Final Result: ${eventName} FAILED. Fired: ${firedEventsCount}, Handled: ${handledEventsCount}, Saved: ${savedEventsCount}`);
+        testPassed.set(eventName, false);
+      }
+    });
 
     return testPassed;
   }

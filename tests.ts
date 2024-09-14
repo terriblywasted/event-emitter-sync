@@ -43,15 +43,19 @@ function assertItWorks() {
     handler,
     repository,
   });
+
   resultsTester.showStats().then((map) => {
+    const successFired = handler.getStats(EventName.EventSuccess);
+    const failFired = handler.getStats(EventName.EventFail);
+
     if (map.get(EventName.EventSuccess) !== true) {
-      throw new Error(`Assert(EventName.EventSuccess === true) error`);
+      throw new Error(`Assert failure: EventSuccess expected true, but got false. Fired: ${successFired}`);
     }
     if (map.get(EventName.EventFail) !== false) {
-      throw new Error(`Assert(EventName.EventSuccess === false) error`);
+      throw new Error(`Assert failure: EventFail expected false, but got true. Fired: ${failFired}`);
     }
 
-    console.log("Tests finished");
+    console.log("Tests finished successfully");
   });
 }
 
