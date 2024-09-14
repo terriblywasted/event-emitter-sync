@@ -1,12 +1,13 @@
 /* Check the comments first */
 
-import { EventEmitter } from "./emitter";
-import { EventDelayedRepository } from "./event-repository";
-import { EventStatistics } from "./event-statistics";
-import { ResultsTester } from "./results-tester";
-import { triggerRandomly } from "./utils";
-
 const MAX_EVENTS = 1000;
+const EVENT_SAVE_DELAY_MS = 3 * 100;
+
+enum EventRepositoryError {
+  TOO_MANY = "Too many requests",
+  RESPONSE_FAIL = "Response delivery fail",
+  REQUEST_FAIL = "Request fail",
+}
 
 enum EventName {
   EventA = "A",
@@ -14,6 +15,69 @@ enum EventName {
 }
 
 const EVENT_NAMES = [EventName.EventA, EventName.EventB];
+
+/*
+
+  Some utils
+
+*/
+
+function randomTo(ms: number) {
+  return Math.floor(Math.random() * ms);
+}
+
+async function triggerRandomly(
+  clb: VoidFunction,
+  maxFires: number,
+  diff: number = 50
+) {
+  if (maxFires <= 0) return;
+  await awaitTimeout(randomTo(diff));
+  clb();
+  triggerRandomly(clb, maxFires - 1, diff);
+}
+
+async function awaitTimeout(ms: number) {
+  return new Promise((res) => setTimeout(res, ms));
+}
+
+/*
+
+  Just a simple even emitter with subscribe and unsubscribe methods
+
+*/
+
+class EventEmitter<T extends string> {
+  events: Map<T, VoidFunction[]>;
+
+  constructor() {
+    this.events = new Map();
+  }
+
+  subscribe(eventName: T, callback: VoidFunction) {
+    const eventSubscribers = this.events.get(eventName);
+    this.events.set(eventName, [...(eventSubscribers || []), callback]);
+  }
+
+  unsubscribe(eventName: T, callback: VoidFunction) {
+    const eventSubscribers = this.events.get(eventName);
+    if (!eventSubscribers) return;
+
+    this.events.set(
+      eventName,
+      eventSubscribers.filter((s) => s !== callback)
+    );
+  }
+
+  emit(eventName: T) {
+    const eventSubscribers = this.events.get(eventName);
+    if (!eventSubscribers) return;
+
+    for (const callback of eventSubscribers) {
+      callback();
+    }
+  }
+}
 
 /*
 
@@ -30,13 +94,84 @@ function init() {
   const repository = new EventRepository();
   const handler = new EventHandler(emitter, repository);
 
-  const resultsTester = new ResultsTester({
-    eventNames: EVENT_NAMES,
-    emitter,
-    handler,
-    repository,
-  });
-  resultsTester.showStats(20);
+  const eventsCount: { [k in EventName]: number } = {
+    [EventName.EventA]: 0,
+    [EventName.EventB]: 0,
+  };
+
+  async function showStats() {
+    function subscribeAndCountEvent(eventName: EventName) {
+      emitter.subscribe(
+        eventName,
+        () => (eventsCount[eventName] = eventsCount[eventName] + 1)
+      );
+    }
+
+    function compareEventWithHandlerAndRepository(eventName: EventName) {
+      console.log(
+        `Event ${eventName}:`,
+        `Fired ${eventsCount[eventName]} times,`,
+        `In handler ${handler.getStats(eventName)},`,
+        `In repo ${handler.repository.getStats(eventName)},`
+      );
+    }
+
+    EVENT_NAMES.map(subscribeAndCountEvent);
+    let syncTimelineSeconds = 100;
+
+    while (syncTimelineSeconds > 0) {
+      await awaitTimeout(1000);
+      console.log("\n----");
+      EVENT_NAMES.map(compareEventWithHandlerAndRepository);
+      syncTimelineSeconds--;
+    }
+  }
+
+  showStats();
+}
+
+class EventStatistics<T extends string> {
+  private eventStats: Map<T, number> = new Map();
+
+  getStats(eventName: T): number {
+    return this.eventStats.get(eventName) || 0;
+  }
+
+  setStats(eventName: T, value: number) {
+    this.eventStats.set(eventName, value);
+  }
+}
+
+/* 
+  class EventDelayedRepository
+
+  Simulates basic repository behavior, capable of asynchronously
+  saving data. It can also return errors or both save and return
+  errors, mimicking real-world scenarios.
+
+  It also resolves with error for "too many requests"
+
+*/
+
+class EventDelayedRepository<T extends string> extends EventStatistics<T> {
+  private lastRequestDate: Date = new Date();
+
+  async updateEventStatsBy(eventName: T, by: number) {
+    const now = new Date();
+
+    if (now.getTime() < this.lastRequestDate.getTime() + EVENT_SAVE_DELAY_MS) {
+      throw EventRepositoryError.TOO_MANY;
+    }
+
+    this.lastRequestDate = now;
+    await awaitTimeout(randomTo(1000));
+
+    const chance = randomTo(1500);
+    if (chance < 300) throw EventRepositoryError.REQUEST_FAIL;
+    this.setStats(eventName, this.getStats(eventName) + by);
+
+    if (chance > 1000) throw EventRepositoryError.RESPONSE_FAIL;
+  }
 }
 
 /* Please do not change the code above this line */

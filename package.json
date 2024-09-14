@@ -4,8 +4,7 @@
   "main": "index.js",
   "license": "MIT",
   "scripts": {
-    "dev": "npx ts-node emitter-sync-pattern.ts",
-    "test": "npx ts-node tests.ts"
+    "dev": "npx ts-node emitter-sync-pattern.ts"
   },
   "dependencies": {
     "ts-node": "^10.9.2",
