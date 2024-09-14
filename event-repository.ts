@@ -1,47 +1,52 @@
-/* 
-  class EventDelayedRepository
-
-  Simulates basic repository behavior, capable of asynchronously
-  saving data. It can also return errors or both save and return
-  errors, mimicking real-world scenarios.
-
-  It also resolves with error for "too many requests"
-
-*/
-
 import { EventStatistics } from "./event-statistics";
 import { awaitTimeout, randomTo } from "./utils";
+import { logWithTimestamp } from "./logging";
 
-const EVENT_SAVE_DELAY_MS = 3 * 100;
-
-enum EventRepositoryError {
+export enum EventRepositoryError {
   TOO_MANY = "Too many requests",
   RESPONSE_FAIL = "Response delivery fail",
   REQUEST_FAIL = "Request fail",
 }
 
-export class EventDelayedRepository<
-  T extends string
-> extends EventStatistics<T> {
+export class TooManyRequestsError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "TooManyRequestsError";
+  }
+}
+
+export class RequestFailError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "RequestFailError";
+  }
+}
+
+export class EventDelayedRepository<T extends string> extends EventStatistics<T> {
   private lastRequestDate: Date = new Date();
+  private eventSaveDelayMs: number;
+
+  constructor(eventSaveDelayMs: number = 150) {
+    super();
+    this.eventSaveDelayMs = eventSaveDelayMs;
+  }
 
   async updateEventStatsBy(eventName: T, by: number) {
     const now = new Date();
 
-    if (now.getTime() < this.lastRequestDate.getTime() + EVENT_SAVE_DELAY_MS) {
-      throw EventRepositoryError.TOO_MANY;
+    if (now.getTime() < this.lastRequestDate.getTime() + this.eventSaveDelayMs) {
+      throw new TooManyRequestsError(EventRepositoryError.TOO_MANY);
     }
 
     this.lastRequestDate = now;
-    await awaitTimeout(randomTo(1000));
 
-    const chance = randomTo(1500);
-    if (chance < 300) throw EventRepositoryError.REQUEST_FAIL;
+    logWithTimestamp(`Simulating delay for event ${eventName}`);
+    await awaitTimeout(randomTo(100)); 
+
+    const chance = randomTo(1000);
+    if (chance < 50) throw new RequestFailError(EventRepositoryError.REQUEST_FAIL);
     this.setStats(eventName, this.getStats(eventName) + by);
 
-    if (chance > 1000) throw EventRepositoryError.RESPONSE_FAIL;
+    if (chance > 950) throw new Error(EventRepositoryError.RESPONSE_FAIL);
   }
 }
-
-/* Please do not change the code above this line */
-/* ----–––––––––––––––––––––––––––––––––––––---- */

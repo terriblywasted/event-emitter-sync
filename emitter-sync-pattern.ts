@@ -1,12 +1,13 @@
-/* Check the comments first */
-
 import { EventEmitter } from "./emitter";
 import { EventDelayedRepository } from "./event-repository";
 import { EventStatistics } from "./event-statistics";
 import { ResultsTester } from "./results-tester";
-import { triggerRandomly } from "./utils";
+import { triggerRandomly, awaitTimeout } from "./utils";
+import { logWithTimestamp } from "./logging";
 
 const MAX_EVENTS = 1000;
+const EVENT_FIRE_DELAY = 300;
+const MAX_RETRIES = 10;
 
 enum EventName {
   EventA = "A",
@@ -15,17 +16,11 @@ enum EventName {
 
 const EVENT_NAMES = [EventName.EventA, EventName.EventB];
 
-/*
-
-  An initial configuration for this case
-
-*/
-
 function init() {
   const emitter = new EventEmitter<EventName>();
 
-  triggerRandomly(() => emitter.emit(EventName.EventA), MAX_EVENTS);
-  triggerRandomly(() => emitter.emit(EventName.EventB), MAX_EVENTS);
+  triggerRandomly(() => emitter.emit(EventName.EventA), MAX_EVENTS, EVENT_FIRE_DELAY);
+  triggerRandomly(() => emitter.emit(EventName.EventB), MAX_EVENTS, EVENT_FIRE_DELAY);
 
   const repository = new EventRepository();
   const handler = new EventHandler(emitter, repository);
@@ -39,49 +34,71 @@ function init() {
   resultsTester.showStats(20);
 }
 
-/* Please do not change the code above this line */
-/* ----–––––––––––––––––––––––––––––––––––––---- */
-
-/*
-
-  The implementation of EventHandler and EventRepository is up to you.
-  Main idea is to subscribe to EventEmitter, save it in local stats
-  along with syncing with EventRepository.
-
-  The implementation of EventHandler and EventRepository is flexible and left to your discretion.
-  The primary objective is to subscribe to EventEmitter, record the events in `.eventStats`,
-  and ensure synchronization with EventRepository.
-
-  The ultimate aim is to have the `.eventStats` of EventHandler and EventRepository
-  have the same values (and equal to the actual events fired by the emitter) by the
-  time MAX_EVENTS have been fired.
-
-*/
+function subscribeToEvents(
+  eventNames: EventName[],
+  emitter: EventEmitter<EventName>,
+  handler: EventHandler
+) {
+  eventNames.forEach((eventName) => {
+    emitter.subscribe(eventName, () => {
+      logWithTimestamp(`Event ${eventName} fired.`);
+      handler.handleEvent(eventName);
+    });
+  });
+}
 
 class EventHandler extends EventStatistics<EventName> {
-  // Feel free to edit this class
-
   repository: EventRepository;
+  private eventQueue: Map<EventName, number> = new Map();
+  private lock = false;
 
   constructor(emitter: EventEmitter<EventName>, repository: EventRepository) {
     super();
     this.repository = repository;
+    subscribeToEvents(EVENT_NAMES, emitter, this);
+  }
 
-    emitter.subscribe(EventName.EventA, () =>
-      this.repository.saveEventData(EventName.EventA, 1)
-    );
+  handleEvent(eventName: EventName) {
+    this.setStats(eventName, this.getStats(eventName) + 1);
+    this.eventQueue.set(eventName, (this.eventQueue.get(eventName) || 0) + 1);
+
+    if (this.eventQueue.get(eventName)! >= 3) { 
+      this.syncWithRepository(eventName);
+    }
+  }
+
+  async syncWithRepository(eventName: EventName) {
+    if (this.lock) return;
+    this.lock = true;
+
+    const eventsToSync = this.eventQueue.get(eventName) || 0;
+    this.eventQueue.set(eventName, 0);
+
+    try {
+      await this.repository.saveBatchEventData(eventName, eventsToSync);
+      logWithTimestamp(`Event ${eventName} synchronized with repository.`);
+    } catch (error) {
+      logWithTimestamp(`Error syncing event ${eventName}: ${error.message}`);
+    } finally {
+      this.lock = false;
+    }
   }
 }
 
 class EventRepository extends EventDelayedRepository<EventName> {
-  // Feel free to edit this class
-
-  async saveEventData(eventName: EventName, _: number) {
+  async saveBatchEventData(eventName: EventName, batchCount: number, retryCount = 0) {
     try {
-      await this.updateEventStatsBy(eventName, 1);
-    } catch (e) {
-      // const _error = e as EventRepositoryError;
-      // console.warn(error);
+      await this.updateEventStatsBy(eventName, batchCount);
+      logWithTimestamp(`Batch of ${batchCount} events for ${eventName} saved.`);
+    } catch (error) {
+      if (retryCount < MAX_RETRIES) {
+        const backoffDelay = Math.pow(2, retryCount) * 100; 
+        logWithTimestamp(`Retrying event ${eventName} (attempt ${retryCount + 1}) after ${backoffDelay}ms`);
+        await awaitTimeout(backoffDelay);
+        await this.saveBatchEventData(eventName, batchCount, retryCount + 1);
+      } else {
+        logWithTimestamp(`Failed to save event ${eventName} after ${MAX_RETRIES} retries.`);
+      }
     }
   }
 }

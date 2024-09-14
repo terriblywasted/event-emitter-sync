@@ -1,9 +1,3 @@
-/*
-
-  Some utils
-
-*/
-
 export function randomTo(ms: number) {
   return Math.floor(Math.random() * ms);
 }
@@ -21,4 +15,12 @@ export async function triggerRandomly(
 
 export async function awaitTimeout(ms: number) {
   return new Promise((res) => setTimeout(res, ms));
+}
+
+export function debounce(fn: (...args: any[]) => void, delay: number) {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  return (...args: any[]) => {
+    if (timeoutId) clearTimeout(timeoutId);
+    timeoutId = setTimeout(() => fn(...args), delay);
+  };
 }

@@ -1,9 +1,3 @@
-/*
-
-  Just a simple even emitter with subscribe and unsubscribe methods
-
-*/
-
 export class EventEmitter<T extends string> {
   events: Map<T, VoidFunction[]>;
 
@@ -35,6 +29,3 @@ export class EventEmitter<T extends string> {
     }
   }
 }
-
-/* Please do not change the code above this line */
-/* ----–––––––––––––––––––––––––––––––––––––---- */
