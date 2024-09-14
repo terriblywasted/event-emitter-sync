@@ -159,6 +159,7 @@ class EventDelayedRepository<T extends string> extends EventStatistics<T> {
   async updateEventStatsBy(eventName: T, by: number) {
     const now = new Date();
 
+    // a little bug: when sending first request we will always get TO_MANY error, so we need to await delay first
     if (now.getTime() < this.lastRequestDate.getTime() + EVENT_SAVE_DELAY_MS) {
       throw EventRepositoryError.TOO_MANY;
     }
@@ -193,30 +194,183 @@ class EventDelayedRepository<T extends string> extends EventStatistics<T> {
 
 */
 
+function isError<ErorType extends EventRepositoryError>(
+  e: unknown,
+  errorType: ErorType,
+): e is ErorType {
+  return typeof e === "string" && e === errorType;
+}
+
+class Queue<QueueEl> {
+  queue: Record<number, QueueEl> = {};
+  start = 0;
+  end = 0;
+
+  constructor() {
+    this.queue = {};
+  }
+
+  pushBack(el: QueueEl) {
+    this.queue[this.end] = el;
+    this.end++;
+  }
+
+  popFront(): QueueEl | null {
+    const out = this.queue[this.start];
+    if (!out) {
+      return null;
+    }
+    delete this.queue[this.start];
+    this.start++;
+    return out;
+  }
+
+  len(): number {
+    return this.end - this.start;
+  }
+
+  peekBack(): QueueEl | null {
+    return this.queue[this.end - 1] || null;
+  }
+}
+
+class EventTranport {
+  paylaod: number;
+  type: EventName;
+  retryAmount = 0;
+
+  constructor(payload: number, type: EventName) {
+    this.paylaod = payload;
+    this.type = type;
+  }
+
+  batch(rhs: EventTranport): EventTranport {
+    this.paylaod += rhs.paylaod;
+    return this;
+  }
+
+  send(to: EventRepository) {
+    return to.saveEventData(this.type, this.paylaod);
+  }
+
+  shouldRetry(): boolean {
+    //shuld always retry cause of random nature of errors, TODO: replace with actual retry cliff
+    return true;
+  }
+}
+
 class EventHandler extends EventStatistics<EventName> {
   // Feel free to edit this class
 
   repository: EventRepository;
 
+  eventTypeToQueue = {} as {
+    [key in EventName]: Queue<EventTranport>;
+  };
+
+  queuesSendLock = false;
+
   constructor(emitter: EventEmitter<EventName>, repository: EventRepository) {
     super();
     this.repository = repository;
 
-    emitter.subscribe(EventName.EventA, () =>
-      this.repository.saveEventData(EventName.EventA, 1)
-    );
+    const processEventNames = (name: EventName) => {
+      this.eventTypeToQueue[name] = new Queue();
+      emitter.subscribe(name, () => this.processEvent(name));
+    };
+
+    EVENT_NAMES.map(processEventNames);
+  }
+
+  processEvent(name: EventName) {
+    this.pushEventToQueue(name);
+    this.updateSingleEventStats(name);
+    this.sendQueuesEvents();
+  }
+
+  pushEventToQueue(name: EventName): EventTranport {
+    const newEvent = new EventTranport(1, name);
+    const selectedQueue = this.eventTypeToQueue[name];
+    const lastEvent = selectedQueue.peekBack();
+    if (lastEvent) {
+      return lastEvent.batch(newEvent);
+    }
+    selectedQueue.pushBack(newEvent);
+    return newEvent;
+  }
+
+  updateSingleEventStats(name: EventName) {
+    this.setStats(name, this.getStats(name) + 1);
+  }
+
+  async sendQueuesEvents() {
+    if (this.queuesSendLock) {
+      return;
+    }
+    this.queuesSendLock = true;
+    let hasSomeEvents = true;
+    while (hasSomeEvents) {
+      let hasSomeEventsInCurIteration = false;
+      for (const eventName of EVENT_NAMES) {
+        const hasSomeEventsLeftInQueue = await this.processQueue(
+          this.eventTypeToQueue[eventName],
+        );
+        if (hasSomeEventsLeftInQueue) {
+          hasSomeEventsInCurIteration = true;
+        }
+      }
+      hasSomeEvents = hasSomeEventsInCurIteration;
+    }
+
+    this.queuesSendLock = false;
+  }
+
+  async processQueue(queue: Queue<EventTranport>): Promise<boolean> {
+    const evenToSend = queue.popFront();
+    if (!evenToSend) {
+      return false;
+    }
+
+    await awaitTimeout(EVENT_SAVE_DELAY_MS);
+    try {
+      await evenToSend.send(this.repository);
+    } catch (e) {
+      console.error(
+        `Error sending event EventName: ${evenToSend.type} error: ${e}`,
+      );
+      if (evenToSend.shouldRetry()) {
+        queue.pushBack(evenToSend);
+      }
+
+      if (isError(e, EventRepositoryError.TOO_MANY)) {
+        await awaitTimeout(EVENT_SAVE_DELAY_MS);
+      }
+    }
+    return queue.len() > 0;
   }
 }
 
 class EventRepository extends EventDelayedRepository<EventName> {
   // Feel free to edit this class
 
-  async saveEventData(eventName: EventName, _: number) {
+  async saveEventData(eventName: EventName, payload: number) {
     try {
-      await this.updateEventStatsBy(eventName, 1);
+      await this.updateEventStatsBy(eventName, payload);
     } catch (e) {
-      // const _error = e as EventRepositoryError;
-      // console.warn(error);
+      console.error(
+        `Error updating delayedRepository EventName: ${eventName} error: ${e} `,
+      );
+      if (isError(e, EventRepositoryError.REQUEST_FAIL)) {
+        throw e;
+      }
+
+      if (isError(e, EventRepositoryError.TOO_MANY)) {
+        throw e;
+      }
+
+      if (isError(e, EventRepositoryError.RESPONSE_FAIL)) {
+        return;
+      }
     }
   }
 }
