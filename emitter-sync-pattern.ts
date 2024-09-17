@@ -114,8 +114,6 @@ class EventRepository extends EventDelayedRepository<EventName> {
       .filter((item) => eventName in item)
       .reduce((acc, val) => acc + val[eventName]!, 0);
     this.queue = this.queue.filter((item) => !(eventName in item));
-    // ("filtred", this.queue);
-    console.log("process update", batched, eventName);
 
     this.timer = setTimeout(() => {
       this.proccessQueue()
@@ -123,11 +121,8 @@ class EventRepository extends EventDelayedRepository<EventName> {
 
     try {
       await this.updateEventStatsBy(eventName, batched);
-      console.log("saved-client", eventName, batched);
     } catch (e) {
       const error = e as EventRepositoryError;
-      console.log(error, batched, eventName);
-
       if (
         error === EventRepositoryError.REQUEST_FAIL ||
         error === EventRepositoryError.TOO_MANY
