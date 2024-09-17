@@ -1,7 +1,11 @@
 /* Check the comments first */
 
 import { EventEmitter } from "./emitter";
-import { EventDelayedRepository } from "./event-repository";
+import {
+  EVENT_SAVE_DELAY_MS,
+  EventDelayedRepository,
+  EventRepositoryError,
+} from "./event-repository";
 import { EventStatistics } from "./event-statistics";
 import { ResultsTester } from "./results-tester";
 import { triggerRandomly } from "./utils";
@@ -59,29 +63,72 @@ function init() {
 */
 
 class EventHandler extends EventStatistics<EventName> {
-  // Feel free to edit this class
-
   repository: EventRepository;
 
   constructor(emitter: EventEmitter<EventName>, repository: EventRepository) {
     super();
     this.repository = repository;
 
-    emitter.subscribe(EventName.EventA, () =>
-      this.repository.saveEventData(EventName.EventA, 1)
-    );
+    EVENT_NAMES.forEach((eventName) => {
+      emitter.subscribe(eventName, () => {
+        this.saveEvent(eventName, 1);
+        this.saveEventToRepository(eventName, 1);
+      });
+    });
+  }
+
+  saveEvent(eventName: EventName, count: number) {
+    this.setStats(eventName, this.getStats(eventName) + count);
+  }
+
+  saveEventToRepository(eventName: EventName, count: number) {
+    this.repository.saveEventData(eventName, count);
   }
 }
 
 class EventRepository extends EventDelayedRepository<EventName> {
-  // Feel free to edit this class
+  private queue: Record<string, number>[] = [];
+  isA = true;
+  timer: ReturnType<typeof setTimeout> | null;
 
-  async saveEventData(eventName: EventName, _: number) {
+  constructor() {
+    super();
+  }
+
+  async saveEventData(passedEventName: EventName, counter: number) {
+    this.queue.push({ [passedEventName]: counter });
+    if (!this.timer) {
+      this.timer = setTimeout(() => {
+        this.proccessQueue();
+      })
+    }
+  }
+
+  async proccessQueue() {
+    this.timer = null;
+    if (this.queue.length === 0) return;
+
+    this.isA = !this.isA;
+    const eventName = this.isA ? EventName.EventA : EventName.EventB;
+    const batched = this.queue
+      .filter((item) => eventName in item)
+      .reduce((acc, val) => acc + val[eventName]!, 0);
+    this.queue = this.queue.filter((item) => !(eventName in item));
+
+    this.timer = setTimeout(() => {
+      this.proccessQueue()
+    }, EVENT_SAVE_DELAY_MS);
+
     try {
-      await this.updateEventStatsBy(eventName, 1);
+      await this.updateEventStatsBy(eventName, batched);
     } catch (e) {
-      // const _error = e as EventRepositoryError;
-      // console.warn(error);
+      const error = e as EventRepositoryError;
+      if (
+        error === EventRepositoryError.REQUEST_FAIL ||
+        error === EventRepositoryError.TOO_MANY
+      ) {
+        this.saveEventData(eventName, batched);
+      }
     }
   }
 }
