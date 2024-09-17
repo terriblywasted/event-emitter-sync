@@ -1,7 +1,11 @@
 /* Check the comments first */
 
 import { EventEmitter } from "./emitter";
-import { EventDelayedRepository } from "./event-repository";
+import {
+  EVENT_SAVE_DELAY_MS,
+  EventDelayedRepository,
+  EventRepositoryError,
+} from "./event-repository";
 import { EventStatistics } from "./event-statistics";
 import { ResultsTester } from "./results-tester";
 import { triggerRandomly } from "./utils";
@@ -67,21 +71,62 @@ class EventHandler extends EventStatistics<EventName> {
     super();
     this.repository = repository;
 
-    emitter.subscribe(EventName.EventA, () =>
-      this.repository.saveEventData(EventName.EventA, 1)
-    );
+    EVENT_NAMES.forEach((eventName) => {
+      emitter.subscribe(eventName, () => {
+        this.saveEvent(eventName, 1);
+        this.saveEventToRepository(eventName, 1);
+      });
+    });
+  }
+
+  saveEvent(eventName: EventName, count: number) {
+    this.setStats(eventName, this.getStats(eventName) + count);
+  }
+
+  saveEventToRepository(eventName: EventName, count: number) {
+    this.repository.saveData(eventName, count);
   }
 }
 
 class EventRepository extends EventDelayedRepository<EventName> {
   // Feel free to edit this class
+  private savedEvents: { [key: string]: number } = {};
+  timer: ReturnType<typeof setTimeout> | null;
 
-  async saveEventData(eventName: EventName, _: number) {
+  async saveData(eventName: EventName, counter: number) {
+    const prevCount = this.savedEvents[eventName] || 0;
+    this.savedEvents[eventName] = prevCount + counter;
+
+    if (!this.timer) {
+      this.process(eventName);
+    }
+  }
+  async process(processedEventName: EventName) {
+    this.timer = null;
+    if (Object.keys(this.savedEvents).length === 0) return;
+
+    const batched = this.savedEvents[processedEventName] || 0;
+    delete this.savedEvents[processedEventName];
+
+    const newEventName =
+      processedEventName === EventName.EventA
+        ? EventName.EventB
+        : EventName.EventA;
+
+    this.timer = setTimeout(() => {
+      this.process(newEventName);
+    }, EVENT_SAVE_DELAY_MS);
+
     try {
-      await this.updateEventStatsBy(eventName, 1);
+      await this.updateEventStatsBy(processedEventName, batched);
     } catch (e) {
-      // const _error = e as EventRepositoryError;
-      // console.warn(error);
+      const error = e as EventRepositoryError;
+      if (
+        error === EventRepositoryError.REQUEST_FAIL ||
+        error === EventRepositoryError.TOO_MANY
+      ) {
+        this.saveData(processedEventName, batched);
+      }
     }
   }
 }
