@@ -1,13 +1,16 @@
 /* Check the comments first */
 
 import { EventEmitter } from "./emitter";
-import { EVENT_SAVE_DELAY_MS, EventDelayedRepository, EventRepositoryError } from "./event-repository";
+import {
+  EVENT_SAVE_DELAY_MS,
+  EventDelayedRepository,
+  EventRepositoryError,
+} from "./event-repository";
 import { EventStatistics } from "./event-statistics";
 import { ResultsTester } from "./results-tester";
 import { triggerRandomly } from "./utils";
 
 const MAX_EVENTS = 1000;
-const BATCH_SIZE = 100;
 
 enum EventName {
   EventA = "A",
@@ -61,86 +64,76 @@ function init() {
 
 class EventHandler extends EventStatistics<EventName> {
   repository: EventRepository;
-  eventQueue: { eventName: EventName; count: number; retryCount: number }[] = [];
-  queueProcessingInterval : number;
-  maxRetries = 3; 
 
   constructor(emitter: EventEmitter<EventName>, repository: EventRepository) {
     super();
     this.repository = repository;
-    this.queueProcessingInterval  = EVENT_SAVE_DELAY_MS;
 
-    for (const eventName of EVENT_NAMES) {
+    EVENT_NAMES.forEach((eventName) => {
       emitter.subscribe(eventName, () => {
-        this.setStats(eventName, this.getStats(eventName) + 1);
-        this.addToQueue(eventName);
+        this.saveEvent(eventName, 1);
+        this.saveEventToRepository(eventName, 1);
       });
-    }
-
-    this.startQueueProcessing();
+    });
   }
 
-  addToQueue(eventName: EventName) {
-    const existingEvent = this.eventQueue.find(item => item.eventName === eventName && item.retryCount === 0);
-    if (existingEvent) {
-      existingEvent.count += 1;
-    } else {
-      this.eventQueue.push({ eventName, count: 1, retryCount: 0 });
-    }
+  saveEvent(eventName: EventName, count: number) {
+    this.setStats(eventName, this.getStats(eventName) + count);
   }
 
-  async startQueueProcessing() {
-    const process = async () => {
-      if (this.eventQueue.length > 0) {
-        await this.processQueue();
-      }
-      setTimeout(process, this.queueProcessingInterval );
-    };
-    process();
-  }
-
-  async processQueue() {
-    const batch = this.eventQueue.splice(0, BATCH_SIZE);
-    const batchMap: { [key in EventName]: number } = {
-      [EventName.EventA]: 0,
-      [EventName.EventB]: 0,
-    };
-
-    for (const { eventName, count } of batch) {
-      batchMap[eventName] += count;
-    }
-
-    await Promise.all(EVENT_NAMES.map(async (eventName) => {
-      if (batchMap[eventName] > 0) {
-        try {
-          await this.repository.saveEventData(eventName, batchMap[eventName]);
-        } catch (e) {
-          batch
-            .filter(item => item.eventName === eventName)
-            .forEach(item => {
-              if (item.retryCount < this.maxRetries) {
-                this.eventQueue.push({ 
-                  eventName: item.eventName, 
-                  count: item.count, 
-                  retryCount: item.retryCount + 1 
-                });
-              } else {
-                console.error(`Max retry limit reached for event: ${eventName}`);
-              }
-            });
-        }
-      }
-    }));
+  saveEventToRepository(eventName: EventName, count: number) {
+    this.repository.saveEventData(eventName, count);
   }
 }
 
 class EventRepository extends EventDelayedRepository<EventName> {
-  async saveEventData(eventName: EventName, count: number) {
+  private queue: Record<string, number>[] = [];
+  isA = true;
+  timer: ReturnType<typeof setTimeout> | null;
+
+  constructor() {
+    super();
+  }
+
+  async saveEventData(passedEventName: EventName, counter: number) {
+    this.queue.push({ [passedEventName]: counter });
+    if (!this.timer) {
+      this.timer = setTimeout(() => {
+        this.proccessQueue();
+      })
+    }
+  }
+
+  async proccessQueue() {
+    this.timer = null;
+    if (this.queue.length === 0) return;
+
+    this.isA = !this.isA;
+    const eventName = this.isA ? EventName.EventA : EventName.EventB;
+    const batched = this.queue
+      .filter((item) => eventName in item)
+      .reduce((acc, val) => acc + val[eventName]!, 0);
+    this.queue = this.queue.filter((item) => !(eventName in item));
+    // ("filtred", this.queue);
+    console.log("process update", batched, eventName);
+
+    this.timer = setTimeout(() => {
+      this.proccessQueue()
+    }, EVENT_SAVE_DELAY_MS);
+
     try {
-      await this.setStats(eventName, this.getStats(eventName) + count);
+      await this.updateEventStatsBy(eventName, batched);
+      console.log("saved-client", eventName, batched);
     } catch (e) {
       const error = e as EventRepositoryError;
-      console.warn(error);
+      console.log(error, batched, eventName);
+
+      if (
+        error === EventRepositoryError.REQUEST_FAIL ||
+        error === EventRepositoryError.TOO_MANY
+      ) {
+        this.saveEventData(eventName, batched);
+      }
     }
   }
 }
