@@ -1,7 +1,7 @@
 /* Check the comments first */
 
 import { EventEmitter } from "./emitter";
-import { EventDelayedRepository } from "./event-repository";
+import { EVENT_SAVE_DELAY_MS, EventDelayedRepository, EventRepositoryError } from "./event-repository";
 import { EventStatistics } from "./event-statistics";
 import { ResultsTester } from "./results-tester";
 import { triggerRandomly } from "./utils";
@@ -67,23 +67,73 @@ class EventHandler extends EventStatistics<EventName> {
     super();
     this.repository = repository;
 
-    emitter.subscribe(EventName.EventA, () =>
-      this.repository.saveEventData(EventName.EventA, 1)
-    );
+    EVENT_NAMES.forEach((eventName) => {
+      emitter.subscribe(eventName, () => {
+        this.saveEvent(eventName);
+        this.saveEventToRepository(eventName);
+      });
+    });
+  }
+
+  saveEvent(eventName: EventName) {
+    this.setStats(eventName, this.getStats(eventName) + 1);
+  }
+
+  saveEventToRepository(eventName: EventName) {
+    this.repository.saveData(eventName, 1);
   }
 }
 
 class EventRepository extends EventDelayedRepository<EventName> {
   // Feel free to edit this class
+  private queue: { [key: string]: number } = {};
+  timer: ReturnType<typeof setTimeout> | null;
 
-  async saveEventData(eventName: EventName, _: number) {
+  async saveData(eventName: EventName, counter: number) {
+    const prevCount = this.queue[eventName] || 0;
+    this.queue[eventName] = prevCount + counter;
+
+    if (!this.timer) {
+      this.processQueue();
+    }
+  }
+  async processQueue() {
+    this.timer = null;
+    if (Object.keys(this.queue).length === 0) return;
+    const events = Object.entries(this.queue);
+
+    let maxCount = 0;
+    let eventNameMax: EventName | "" = "";
+    for (let i = 0; i < events.length; i++) {
+      const event = events[i];
+      if (!event) continue;
+      if (event[1] > maxCount) {
+        maxCount = event[1];
+        eventNameMax = event[0] as EventName;
+      }
+    }
+
+    if (eventNameMax === "") return;
+
+    const eventsCount = this.queue[eventNameMax];
+
+    if (!eventsCount) return;
+
+    delete this.queue[eventNameMax];
+
+    this.timer = setTimeout(() => {
+      this.processQueue();
+    }, EVENT_SAVE_DELAY_MS + 1);
+
     try {
-      await this.updateEventStatsBy(eventName, 1);
+      await this.updateEventStatsBy(eventNameMax, eventsCount);
     } catch (e) {
-      // const _error = e as EventRepositoryError;
-      // console.warn(error);
+      const error = e as EventRepositoryError;
+
+      if (error === EventRepositoryError.REQUEST_FAIL || error === EventRepositoryError.TOO_MANY) {
+        this.saveData(eventNameMax, eventsCount);
+      }
     }
   }
 }
-
 init();
