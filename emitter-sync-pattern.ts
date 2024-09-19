@@ -62,15 +62,21 @@ class EventHandler extends EventStatistics<EventName> {
   // Feel free to edit this class
 
   repository: EventRepository;
+  // private _eventStats = new Map<EventName, number>([]);
 
   constructor(emitter: EventEmitter<EventName>, repository: EventRepository) {
     super();
     this.repository = repository;
 
-    emitter.subscribe(EventName.EventA, () =>
-      this.repository.saveEventData(EventName.EventA, 1)
-    );
+    emitter.subscribe(EventName.EventA, () => {
+      // this.updateEventStats();
+      this.repository.saveEventData(EventName.EventA, 1);
+    });
   }
+
+  // private updateEventStats() {
+  //   this._eventStats.set(EventName.EventA, 1);
+  // }
 }
 
 class EventRepository extends EventDelayedRepository<EventName> {
