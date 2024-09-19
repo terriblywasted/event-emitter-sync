@@ -1,10 +1,10 @@
 /* Check the comments first */
 
-import { EventEmitter } from "./emitter";
-import { EventDelayedRepository } from "./event-repository";
-import { EventStatistics } from "./event-statistics";
-import { ResultsTester } from "./results-tester";
-import { triggerRandomly } from "./utils";
+import {EventEmitter} from "./emitter";
+import {EventDelayedRepository, EventRepositoryError} from "./event-repository";
+import {EventStatistics} from "./event-statistics";
+import {ResultsTester} from "./results-tester";
+import {triggerRandomly} from "./utils";
 
 const MAX_EVENTS = 1000;
 
@@ -16,7 +16,6 @@ enum EventName {
 const EVENT_NAMES = [EventName.EventA, EventName.EventB];
 
 /*
-
   An initial configuration for this case
 
 */
@@ -59,31 +58,40 @@ function init() {
 */
 
 class EventHandler extends EventStatistics<EventName> {
-  // Feel free to edit this class
-
   repository: EventRepository;
-
   constructor(emitter: EventEmitter<EventName>, repository: EventRepository) {
     super();
     this.repository = repository;
-
-    emitter.subscribe(EventName.EventA, () =>
-      this.repository.saveEventData(EventName.EventA, 1)
-    );
+    emitter.subscribe(EventName.EventA, () => this.handleEvent(EventName.EventA));
+    emitter.subscribe(EventName.EventB, () => this.handleEvent(EventName.EventB));
+  }
+  private async handleEvent (eventName: EventName) {
+    const currentCount = this.getStats(eventName) + 1;
+    this.setStats(eventName, currentCount);
+    await this.repository.saveEventData(eventName, currentCount);
   }
 }
 
 class EventRepository extends EventDelayedRepository<EventName> {
-  // Feel free to edit this class
+  syncData: Record<EventName, number> = {
+    [EventName.EventA]: 0,
+    [EventName.EventB]: 0,
+  };
 
-  async saveEventData(eventName: EventName, _: number) {
+  async saveEventData(eventName: EventName, count: number) {
     try {
-      await this.updateEventStatsBy(eventName, 1);
+      const dif = count - this.getStats(eventName);
+      await this.updateEventStatsBy(eventName, dif > 0 ? dif + this.syncData[eventName]: 1);
+      this.syncData[eventName] = 0;
     } catch (e) {
-      // const _error = e as EventRepositoryError;
-      // console.warn(error);
+      const error = e as EventRepositoryError;
+      if(error === EventRepositoryError.TOO_MANY) {
+        this.syncData[eventName]++;
+      } else if(error === EventRepositoryError.REQUEST_FAIL) {
+        const dif = count - this.getStats(eventName);
+        this.syncData[eventName] += dif > 0 ? dif: 1;
+      }
     }
   }
 }
-
 init();
