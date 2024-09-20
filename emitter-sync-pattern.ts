@@ -1,7 +1,10 @@
 /* Check the comments first */
-
 import { EventEmitter } from "./emitter";
-import { EventDelayedRepository } from "./event-repository";
+import {
+  EVENT_SAVE_DELAY_MS,
+  EventDelayedRepository,
+  EventRepositoryError,
+} from "./event-repository";
 import { EventStatistics } from "./event-statistics";
 import { ResultsTester } from "./results-tester";
 import { triggerRandomly } from "./utils";
@@ -59,30 +62,56 @@ function init() {
 */
 
 class EventHandler extends EventStatistics<EventName> {
-  // Feel free to edit this class
-
   repository: EventRepository;
 
   constructor(emitter: EventEmitter<EventName>, repository: EventRepository) {
     super();
     this.repository = repository;
 
-    emitter.subscribe(EventName.EventA, () =>
-      this.repository.saveEventData(EventName.EventA, 1)
-    );
+    EVENT_NAMES.forEach((eventName) => {
+      emitter.subscribe(eventName, () => this.saveEventData(eventName));
+    });
+  }
+
+  saveEventData(eventName: EventName) {
+    this.setStats(eventName, this.getStats(eventName) + 1);
+    this.repository.saveEventData(eventName, 1);
   }
 }
 
 class EventRepository extends EventDelayedRepository<EventName> {
-  // Feel free to edit this class
+  private batch: Map<EventName, number> = new Map();
+  private lastRequest: Date = new Date();
 
-  async saveEventData(eventName: EventName, _: number) {
-    try {
-      await this.updateEventStatsBy(eventName, 1);
-    } catch (e) {
-      // const _error = e as EventRepositoryError;
-      // console.warn(error);
+  saveEventData(eventName: EventName, increment: number) {
+    this.updateEventBatch(eventName, increment);
+    if (this.lastRequest.getTime() + EVENT_SAVE_DELAY_MS < new Date().getTime()) {
+      this.sendBatch();
     }
+  }
+
+  async sendBatch() {
+    const [eventName, eventBatch] = Array.from(this.batch.entries()).reduce((maxItem, item) =>
+      maxItem[1] > item[1] ? maxItem : item
+    );
+
+    this.updateEventBatch(eventName, -eventBatch);
+    this.lastRequest = new Date();
+
+    try {
+      await this.updateEventStatsBy(eventName, eventBatch);
+    } catch (e) {
+      const error = e as EventRepositoryError;
+
+      if (error === EventRepositoryError.REQUEST_FAIL || error === EventRepositoryError.TOO_MANY) {
+        this.updateEventBatch(eventName, eventBatch);
+      }
+    }
+  }
+
+  updateEventBatch(eventName: EventName, increment: number) {
+    const eventBatch = (this.batch.get(eventName) || 0) + increment;
+    this.batch.set(eventName, eventBatch);
   }
 }
 
