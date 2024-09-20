@@ -1,10 +1,10 @@
 /* Check the comments first */
 
 import { EventEmitter } from "./emitter";
-import { EventDelayedRepository } from "./event-repository";
+import {EventDelayedRepository} from "./event-repository";
 import { EventStatistics } from "./event-statistics";
 import { ResultsTester } from "./results-tester";
-import { triggerRandomly } from "./utils";
+import { triggerRandomly} from "./utils";
 
 const MAX_EVENTS = 1000;
 
@@ -14,6 +14,12 @@ enum EventName {
 }
 
 const EVENT_NAMES = [EventName.EventA, EventName.EventB];
+
+enum EventRepositoryError {
+  TOO_MANY = "Too many requests",
+  RESPONSE_FAIL = "Response delivery fail",
+  REQUEST_FAIL = "Request fail",
+}
 
 /*
 
@@ -60,28 +66,59 @@ function init() {
 
 class EventHandler extends EventStatistics<EventName> {
   // Feel free to edit this class
-
   repository: EventRepository;
 
   constructor(emitter: EventEmitter<EventName>, repository: EventRepository) {
     super();
     this.repository = repository;
 
-    emitter.subscribe(EventName.EventA, () =>
-      this.repository.saveEventData(EventName.EventA, 1)
-    );
+    EVENT_NAMES.map((event) => {
+      emitter.subscribe(event, async () => {
+        await this.handleEvent(event)
+      });
+    })
+  }
+
+  async handleEvent(event: EventName) {
+    const payload = (this.getStats(event) || 0) + 1
+    this.setStats(event, payload);
+    await this.repository.saveEventData(event, payload)
   }
 }
 
 class EventRepository extends EventDelayedRepository<EventName> {
   // Feel free to edit this class
+  private syncEventsData: Map<EventName, number> = new Map([
+    [EventName.EventA, 0],
+    [EventName.EventB, 0]
+  ])
 
-  async saveEventData(eventName: EventName, _: number) {
+  private increaseSyncData(eventName: EventName) {
+    this.syncEventsData.set(eventName, (this.syncEventsData.get(eventName) || 0) + 1)
+  }
+
+  async saveEventData(eventName: EventName, eventCount: number) {
+    const delta = eventCount - this.getStats(eventName)
+
+    const payload = delta > 0 ? delta + (this.syncEventsData.get(eventName) || 0) : 1
+
     try {
-      await this.updateEventStatsBy(eventName, 1);
+      await this.updateEventStatsBy(eventName, payload)
+
+      this.syncEventsData.set(eventName, 0)
     } catch (e) {
-      // const _error = e as EventRepositoryError;
-      // console.warn(error);
+      const _error = e as EventRepositoryError;
+
+      switch (_error) {
+        case EventRepositoryError.REQUEST_FAIL:
+          await this.saveEventData(eventName, eventCount)
+          break
+        case EventRepositoryError.RESPONSE_FAIL:
+          break
+        case EventRepositoryError.TOO_MANY:
+          this.increaseSyncData(eventName)
+          break
+      }
     }
   }
 }
