@@ -1,4 +1,4 @@
-/* 
+/*
   class EventDelayedRepository
 
   Simulates basic repository behavior, capable of asynchronously
@@ -14,7 +14,7 @@ import { awaitTimeout, randomTo } from "./utils";
 
 const EVENT_SAVE_DELAY_MS = 3 * 100;
 
-enum EventRepositoryError {
+export enum EventRepositoryError {
   TOO_MANY = "Too many requests",
   RESPONSE_FAIL = "Response delivery fail",
   REQUEST_FAIL = "Request fail",
