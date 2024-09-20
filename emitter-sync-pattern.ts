@@ -1,7 +1,10 @@
 /* Check the comments first */
 
 import { EventEmitter } from "./emitter";
-import { EventDelayedRepository } from "./event-repository";
+import {
+  EventDelayedRepository,
+  EventRepositoryError,
+} from "./event-repository";
 import { EventStatistics } from "./event-statistics";
 import { ResultsTester } from "./results-tester";
 import { triggerRandomly } from "./utils";
@@ -59,36 +62,66 @@ function init() {
 */
 
 class EventHandler extends EventStatistics<EventName> {
-  // Feel free to edit this class
-
-  repository: EventRepository;
-  // private _eventStats = new Map<EventName, number>([]);
+  private _repository: EventRepository;
 
   constructor(emitter: EventEmitter<EventName>, repository: EventRepository) {
     super();
-    this.repository = repository;
+    this._repository = repository;
 
-    emitter.subscribe(EventName.EventA, () => {
-      // this.updateEventStats();
-      this.repository.saveEventData(EventName.EventA, 1);
-    });
+    for (let eventName of EVENT_NAMES) {
+      emitter.subscribe(eventName, () => this._handleEvent(eventName));
+    }
   }
 
-  // private updateEventStats() {
-  //   this._eventStats.set(EventName.EventA, 1);
-  // }
+  private _handleEvent(eventName: EventName) {
+    this.setStats(eventName, this.getStats(eventName) + 1);
+    this._repository.saveEventData(eventName, this.getStats(eventName));
+  }
 }
 
 class EventRepository extends EventDelayedRepository<EventName> {
-  // Feel free to edit this class
+  private _deltas = new DeltasController();
 
-  async saveEventData(eventName: EventName, _: number) {
+  async saveEventData(eventName: EventName, handlerEvents: number) {
     try {
-      await this.updateEventStatsBy(eventName, 1);
-    } catch (e) {
-      // const _error = e as EventRepositoryError;
-      // console.warn(error);
+      let payload = 1;
+
+      if (this._deltas.get(eventName) > 0) {
+        payload =
+          handlerEvents -
+          this.getStats(eventName) +
+          this._deltas.get(eventName);
+      }
+
+      await this.updateEventStatsBy(eventName, payload);
+      this._deltas.clear(eventName);
+    } catch (error) {
+      switch (error) {
+        case EventRepositoryError.RESPONSE_FAIL:
+          this._deltas.clear(eventName);
+          break;
+        case EventRepositoryError.REQUEST_FAIL:
+          this.saveEventData(eventName, handlerEvents);
+        case EventRepositoryError.TOO_MANY:
+          this._deltas.update(eventName, this._deltas.get(eventName) + 1);
+      }
     }
+  }
+}
+
+class DeltasController {
+  private _cache: Map<EventName, number> = new Map([]);
+
+  get(eventName: EventName) {
+    return this._cache.get(eventName) || 0;
+  }
+
+  update(eventName: EventName, value: number) {
+    this._cache.set(eventName, value);
+  }
+
+  clear(eventName: EventName) {
+    this._cache.delete(eventName);
   }
 }
 
