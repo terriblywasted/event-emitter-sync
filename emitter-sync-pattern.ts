@@ -1,7 +1,10 @@
 /* Check the comments first */
 
 import { EventEmitter } from "./emitter";
-import { EventDelayedRepository } from "./event-repository";
+import {
+  EventDelayedRepository,
+  EventRepositoryError,
+} from "./event-repository";
 import { EventStatistics } from "./event-statistics";
 import { ResultsTester } from "./results-tester";
 import { triggerRandomly } from "./utils";
@@ -59,30 +62,37 @@ function init() {
 */
 
 class EventHandler extends EventStatistics<EventName> {
-  // Feel free to edit this class
-
-  repository: EventRepository;
+  private readonly repository: EventRepository;
+  emitter: EventEmitter<EventName>;
 
   constructor(emitter: EventEmitter<EventName>, repository: EventRepository) {
     super();
     this.repository = repository;
-
-    emitter.subscribe(EventName.EventA, () =>
-      this.repository.saveEventData(EventName.EventA, 1)
-    );
+    this.emitter = emitter;
+    this.subscribeHandler();
+  }
+  subscribeHandler() {
+    EVENT_NAMES.map((name) => {
+      const handler = () => {
+        this.setStats(name, this.getStats(name) + 1);
+        this.repository.saveEventData(name, 1);
+      };
+      this.emitter.subscribe(name, handler);
+    });
   }
 }
 
 class EventRepository extends EventDelayedRepository<EventName> {
-  // Feel free to edit this class
-
   async saveEventData(eventName: EventName, _: number) {
     try {
-      await this.updateEventStatsBy(eventName, 1);
+      await this.updateEventStats(eventName, 1);
     } catch (e) {
-      // const _error = e as EventRepositoryError;
-      // console.warn(error);
+      const _error = e as EventRepositoryError;
+      console.warn(_error);
     }
+  }
+  async updateEventStats(eventName: EventName, value: number) {
+    this.setStats(eventName, this.getStats(eventName) + value);
   }
 }
 
