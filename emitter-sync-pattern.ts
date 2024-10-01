@@ -67,9 +67,14 @@ class EventHandler extends EventStatistics<EventName> {
     super();
     this.repository = repository;
 
-    emitter.subscribe(EventName.EventA, () =>
-      this.repository.saveEventData(EventName.EventA, 1)
-    );
+    EVENT_NAMES.forEach(eventName => {
+      emitter.subscribe(eventName, async () => {
+        this.setStats(eventName, this.getStats(eventName) + 1);
+
+        await this.repository.saveEventData(eventName, 1); //just execute the repository method and then set stats to the actual value. if I understood it correctly
+        this.repository.setStats(eventName, this.getStats(eventName))
+      });
+    });
   }
 }
 
