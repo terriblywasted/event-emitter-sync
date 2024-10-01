@@ -62,26 +62,74 @@ class EventHandler extends EventStatistics<EventName> {
   // Feel free to edit this class
 
   repository: EventRepository;
+  emitter: EventEmitter<EventName>;
 
   constructor(emitter: EventEmitter<EventName>, repository: EventRepository) {
     super();
     this.repository = repository;
+    this.emitter = emitter;
+    this.subscribeEvents();
+  }
 
-    emitter.subscribe(EventName.EventA, () =>
-      this.repository.saveEventData(EventName.EventA, 1)
-    );
+  private subscribeEvents() {
+    EVENT_NAMES.forEach((eventName) => {
+      this.emitter.subscribe(eventName, async () => {
+        await this.saveEventData(eventName);
+      });
+    });
+  }
+
+  private async saveEventData(eventName: EventName) {
+    this.setStats(eventName, this.getStats(eventName) + 1);
+    await this.repository.saveEventData(eventName, 1);
   }
 }
 
-class EventRepository extends EventDelayedRepository<EventName> {
-  // Feel free to edit this class
+enum EventRepositoryError {
+  TOO_MANY = "Too many requests",
+  RESPONSE_FAIL = "Response delivery fail",
+  REQUEST_FAIL = "Request fail",
+}
 
-  async saveEventData(eventName: EventName, _: number) {
-    try {
-      await this.updateEventStatsBy(eventName, 1);
-    } catch (e) {
-      // const _error = e as EventRepositoryError;
-      // console.warn(error);
+class EventRepository extends EventDelayedRepository<EventName> {
+  private eventBatch: { name: EventName; count: number }[] = [];
+  private batchingDelay: number = 300;
+
+  constructor() {
+    super();
+    setInterval(() => this.flushBatch(), this.batchingDelay);
+  }
+
+  async saveEventData(eventName: EventName, count: number) {
+    const existingEvent = this.eventBatch.find(
+        (event) => event.name === eventName,
+    );
+    if (existingEvent) {
+      existingEvent.count += count;
+    } else {
+      this.eventBatch.push({ name: eventName, count });
+    }
+  }
+
+  private async flushBatch() {
+    if (this.eventBatch.length === 0) return;
+    while (this.eventBatch.length !== 0) {
+      const event = this.eventBatch.shift();
+      if (event) {
+        try {
+          await this.updateEventStatsBy(event.name, event.count);
+        } catch (e) {
+          const error = e as EventRepositoryError;
+          switch (error) {
+            case EventRepositoryError.REQUEST_FAIL:
+            case EventRepositoryError.TOO_MANY:
+              this.eventBatch.unshift(event);
+              break;
+            case EventRepositoryError.RESPONSE_FAIL:
+              break;
+          }
+        }
+      }
     }
   }
 }
