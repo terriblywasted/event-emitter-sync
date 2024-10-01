@@ -62,19 +62,32 @@ class EventHandler extends EventStatistics<EventName> {
   // Feel free to edit this class
 
   repository: EventRepository;
+  emitter: EventEmitter<EventName>;
+
+  private readonly events: Map<EventName, () => void>;
 
   constructor(emitter: EventEmitter<EventName>, repository: EventRepository) {
     super();
     this.repository = repository;
+    this.emitter = emitter;
+    this.events = new Map();
 
-    emitter.subscribe(EventName.EventA, () =>
-      this.repository.saveEventData(EventName.EventA, 1)
-    );
+    this.subscribe();
+  }
+
+  subscribe() {
+    EVENT_NAMES.map(event => {
+      const handler = () => {
+        this.setStats(event, this.getStats(event) + 1);
+        this.repository.saveEventData(event, 1);
+      }
+      this.events.set(event, handler);
+      this.emitter.subscribe(event, handler);
+    });
   }
 }
 
 class EventRepository extends EventDelayedRepository<EventName> {
-  // Feel free to edit this class
 
   async saveEventData(eventName: EventName, _: number) {
     try {
@@ -83,6 +96,10 @@ class EventRepository extends EventDelayedRepository<EventName> {
       // const _error = e as EventRepositoryError;
       // console.warn(error);
     }
+  }
+
+  async updateEventStatsBy(eventName: EventName, value: number) {
+    this.setStats(eventName, this.getStats(eventName) + value);
   }
 }
 
