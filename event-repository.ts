@@ -20,9 +20,7 @@ enum EventRepositoryError {
   REQUEST_FAIL = "Request fail",
 }
 
-export class EventDelayedRepository<
-  T extends string
-> extends EventStatistics<T> {
+export class EventDelayedRepository<T extends string> extends EventStatistics<T> {
   private lastRequestDate: Date = new Date();
 
   async updateEventStatsBy(eventName: T, by: number) {

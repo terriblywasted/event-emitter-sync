@@ -67,9 +67,15 @@ class EventHandler extends EventStatistics<EventName> {
     super();
     this.repository = repository;
 
-    emitter.subscribe(EventName.EventA, () =>
+    emitter.subscribe(EventName.EventA, () => {
+      this.setStats(EventName.EventA, this.getStats(EventName.EventA) + 1);
       this.repository.saveEventData(EventName.EventA, 1)
-    );
+    });
+
+    emitter.subscribe(EventName.EventB, () => {
+      this.setStats(EventName.EventB, this.getStats(EventName.EventB) + 1);
+      this.repository.saveEventData(EventName.EventB, 1);
+    });
   }
 }
 
