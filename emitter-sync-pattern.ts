@@ -68,8 +68,16 @@ class EventHandler extends EventStatistics<EventName> {
     this.repository = repository;
 
     emitter.subscribe(EventName.EventA, () =>
-      this.repository.saveEventData(EventName.EventA, 1)
+      this.repository.saveEventData(EventName.EventA, 1).then(({ eventName, v }) => {
+        this.setStats(eventName, this.getStats(eventName) + v);
+      }),
     );
+
+    emitter.subscribe(EventName.EventB, () => {
+      this.repository.saveEventData(EventName.EventB, 1).then(({ eventName, v }) => {
+          this.setStats(eventName, this.getStats(eventName) + v);
+      });
+    });
   }
 }
 
@@ -77,12 +85,18 @@ class EventRepository extends EventDelayedRepository<EventName> {
   // Feel free to edit this class
 
   async saveEventData(eventName: EventName, _: number) {
+    let v = 0;
     try {
       await this.updateEventStatsBy(eventName, 1);
+      v = 1;
     } catch (e) {
       // const _error = e as EventRepositoryError;
       // console.warn(error);
+      if (e === 'Response delivery fail') {
+        v = 1;
+      }
     }
+    return { eventName, v }
   }
 }
 
