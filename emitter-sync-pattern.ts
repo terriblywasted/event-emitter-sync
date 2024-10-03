@@ -93,7 +93,7 @@ class EventRepository extends EventDelayedRepository<EventName> {
       // const _error = e as EventRepositoryError;
       // console.warn(error);
       if (e === 'Response delivery fail') {
-        this.setStats(eventName, this.getStats(eventName) > 0 ? this.getStats(eventName) - 1 : 0);
+        v = 1;
       }
     }
     return { eventName, v }
