@@ -59,29 +59,33 @@ function init() {
 */
 
 class EventHandler extends EventStatistics<EventName> {
-  // Feel free to edit this class
-
-  repository: EventRepository;
+  private repository: EventRepository;
 
   constructor(emitter: EventEmitter<EventName>, repository: EventRepository) {
     super();
     this.repository = repository;
 
-    emitter.subscribe(EventName.EventA, () =>
-      this.repository.saveEventData(EventName.EventA, 1)
-    );
+    for (const event of EVENT_NAMES) {
+      emitter.subscribe(event, () => {
+        this.setStats(event, this.getStats(event) + 1);
+
+        this.repository.saveEventData(event, 1).then(() => {
+          this.repository.setStats(event, this.getStats(event));
+        });
+      });
+    }
   }
 }
 
 class EventRepository extends EventDelayedRepository<EventName> {
-  // Feel free to edit this class
-
-  async saveEventData(eventName: EventName, _: number) {
+  async saveEventData(eventName: EventName, count: number) {
     try {
-      await this.updateEventStatsBy(eventName, 1);
+      await this.updateEventStatsBy(eventName, count);
     } catch (e) {
-      // const _error = e as EventRepositoryError;
-      // console.warn(error);
+      // or some other desired condtion for logging purposes
+      if (process.env.LOG_LEVEL === "warn") {
+        console.warn(e);
+      }
     }
   }
 }
