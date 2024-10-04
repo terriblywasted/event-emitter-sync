@@ -59,29 +59,94 @@ function init() {
 */
 
 class EventHandler extends EventStatistics<EventName> {
-  // Feel free to edit this class
+  repository: EventDelayedRepository<EventName>;
+  private syncIntervalA: ReturnType<typeof setInterval>;
+  private syncIntervalB: ReturnType<typeof setInterval>;
+  private throttledSyncA: (...args: any[]) => void;
+  private throttledSyncB: (...args: any[]) => void;
 
-  repository: EventRepository;
-
-  constructor(emitter: EventEmitter<EventName>, repository: EventRepository) {
+  constructor(emitter: EventEmitter<EventName>, repository: EventDelayedRepository<EventName>) {
     super();
     this.repository = repository;
 
-    emitter.subscribe(EventName.EventA, () =>
-      this.repository.saveEventData(EventName.EventA, 1)
-    );
+    // Подписываемся на события
+    emitter.subscribe(EventName.EventA, () => this.handleEvent(EventName.EventA));
+    emitter.subscribe(EventName.EventB, () => this.handleEvent(EventName.EventB));
+
+    setTimeout(() => {
+      this.syncWithRepository(EventName.EventA);
+      this.syncWithRepository(EventName.EventB);
+    }, 100);
+
+    this.throttledSyncA = this.throttle(() => this.syncWithRepository(EventName.EventA), 300);
+    this.throttledSyncB = this.throttle(() => this.syncWithRepository(EventName.EventB), 300);
+
+    this.syncIntervalA = setInterval(this.throttledSyncA, 300);
+    this.syncIntervalB = setInterval(this.throttledSyncB, 300);
+  }
+
+  private handleEvent(eventName: EventName) {
+    this.setStats(eventName, this.getStats(eventName) + 1);
+  }
+
+  private async syncWithRepository(eventName: EventName) {
+    const count = this.getStats(eventName);
+    const repoCount = this.repository.getStats(eventName);
+    const toSync = count - repoCount;
+
+    if (toSync > 0) {
+      try {
+        await this.syncWithRetries(eventName, toSync);
+      } catch (error) {
+
+      }
+    }
+  }
+
+  private throttle(fn: (...args: any[]) => void, delay: number) {
+    let lastCall = 0;
+    return (...args: any[]) => {
+      const now = new Date().getTime();
+      if (now - lastCall >= delay) {
+        lastCall = now;
+        fn(...args);
+      }
+    };
+  }
+
+  private async syncWithRetries(eventName: EventName, count: number, retries = 3) {
+    let attempt = 0;
+    while (attempt < retries) {
+      try {
+        await this.repository.updateEventStatsBy(eventName, count);
+        break;
+      } catch (error) {
+        if (error === "Too many requests") {
+          attempt++;
+          await this.delay(100); 
+        } else {
+          throw error;
+        }
+      }
+    }
+  }
+
+  private delay(ms: number) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  stopSync() {
+    clearInterval(this.syncIntervalA);
+    clearInterval(this.syncIntervalB);
   }
 }
 
 class EventRepository extends EventDelayedRepository<EventName> {
-  // Feel free to edit this class
-
-  async saveEventData(eventName: EventName, _: number) {
+  async saveEventData(eventName: EventName, increment: number) {
     try {
-      await this.updateEventStatsBy(eventName, 1);
-    } catch (e) {
-      // const _error = e as EventRepositoryError;
-      // console.warn(error);
+      await this.updateEventStatsBy(eventName, increment);
+    } catch (error) {
+     
     }
   }
 }
