@@ -60,30 +60,36 @@ function init() {
 
 class EventHandler extends EventStatistics<EventName> {
   // Feel free to edit this class
-
   repository: EventRepository;
+
 
   constructor(emitter: EventEmitter<EventName>, repository: EventRepository) {
     super();
+    console.log(Array.from(emitter.events.keys())) // []
+    // i d rather to have all of actual events
     this.repository = repository;
-
-    emitter.subscribe(EventName.EventA, () =>
-      this.repository.saveEventData(EventName.EventA, 1)
-    );
+    {
+      EVENT_NAMES.forEach(async (name) => {
+        emitter.subscribe(name, () => {
+          this.setStats(name, this.getStats(name) + 1);
+          this.repository.saveEventData(name, 1);
+        });
+      });
+    }
   }
 }
 
 class EventRepository extends EventDelayedRepository<EventName> {
-  // Feel free to edit this class
-
   async saveEventData(eventName: EventName, _: number) {
     try {
-      await this.updateEventStatsBy(eventName, 1);
+      await (async () => {
+        this.setStats(eventName, this.getStats(eventName)+1)
+      })()
     } catch (e) {
-      // const _error = e as EventRepositoryError;
-      // console.warn(error);
+      // hmmm
     }
   }
+
 }
 
 init();
