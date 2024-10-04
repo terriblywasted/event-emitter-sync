@@ -69,12 +69,13 @@ class EventHandler extends EventStatistics<EventName> {
     // i d rather to have all of actual events
     this.repository = repository;
     {
-      EVENT_NAMES.forEach(async (name) => {
+      EVENT_NAMES.forEach((name) => {
         emitter.subscribe(name, () => {
             this.setStats(name, this.getStats(name) + 1);
         // i dont know what did u mean here:"to fake remote repo events every 2 seconds"
-
-          this.repository.saveEventData(name, 1);
+          (async () => {
+            await this.repository.saveEventData(name, 1);
+          })()
 
         });
       });
@@ -85,9 +86,7 @@ class EventHandler extends EventStatistics<EventName> {
 class EventRepository extends EventDelayedRepository<EventName> {
   async saveEventData(eventName: EventName, _: number) {
     try {
-      await (async () => {
         this.setStats(eventName, this.getStats(eventName)+1)
-      })()
     } catch (e) {
       // hmmm
     }
