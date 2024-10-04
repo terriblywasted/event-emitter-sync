@@ -1,7 +1,7 @@
 /* Check the comments first */
 
 import { EventEmitter } from "./emitter";
-import { EventDelayedRepository } from "./event-repository";
+import { EventDelayedRepository, EventRepositoryError } from "./event-repository";
 import { EventStatistics } from "./event-statistics";
 import { ResultsTester } from "./results-tester";
 import { triggerRandomly } from "./utils";
@@ -60,28 +60,50 @@ function init() {
 
 class EventHandler extends EventStatistics<EventName> {
   // Feel free to edit this class
-
   repository: EventRepository;
 
   constructor(emitter: EventEmitter<EventName>, repository: EventRepository) {
     super();
     this.repository = repository;
 
-    emitter.subscribe(EventName.EventA, () =>
-      this.repository.saveEventData(EventName.EventA, 1)
-    );
+    EVENT_NAMES.forEach((name) => {
+      emitter.subscribe(name, async () => {
+        const payload = (this.getStats(name) || 0) + 1
+        this.setStats(name, payload);
+        await this.repository.saveEventData(name, payload)
+      });
+    })
   }
 }
 
 class EventRepository extends EventDelayedRepository<EventName> {
-  // Feel free to edit this class
+  private lastName: EventName;
 
-  async saveEventData(eventName: EventName, _: number) {
+  async saveEventData(name: EventName, count: number) {
+    if (this.lastName && this.lastName == name) {
+      return;
+    }
+    
+    const diff = count - this.getStats(name) - 1
+
+    const value = diff > 0 ? diff  : 1
+
     try {
-      await this.updateEventStatsBy(eventName, 1);
+      this.lastName = name;
+      await this.updateEventStatsBy(name, value)
     } catch (e) {
-      // const _error = e as EventRepositoryError;
-      // console.warn(error);
+      const _error = e as EventRepositoryError;
+
+      switch (_error) {
+        case EventRepositoryError.REQUEST_FAIL:
+          await this.saveEventData(name, count)
+          this.lastName = name;
+          break
+        case EventRepositoryError.RESPONSE_FAIL:
+          break
+        case EventRepositoryError.TOO_MANY:
+          break
+      }
     }
   }
 }
