@@ -71,8 +71,11 @@ class EventHandler extends EventStatistics<EventName> {
     {
       EVENT_NAMES.forEach(async (name) => {
         emitter.subscribe(name, () => {
-          this.setStats(name, this.getStats(name) + 1);
+            this.setStats(name, this.getStats(name) + 1);
+        // i dont know what did u mean here:"to fake remote repo events every 2 seconds"
+
           this.repository.saveEventData(name, 1);
+
         });
       });
     }
