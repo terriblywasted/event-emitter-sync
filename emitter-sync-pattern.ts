@@ -1,7 +1,7 @@
 /* Check the comments first */
 
 import { EventEmitter } from "./emitter";
-import { EventDelayedRepository } from "./event-repository";
+import { EventDelayedRepository, EventRepositoryError } from "./event-repository";
 import { EventStatistics } from "./event-statistics";
 import { ResultsTester } from "./results-tester";
 import { triggerRandomly } from "./utils";
@@ -100,8 +100,9 @@ class EventRepository extends EventDelayedRepository<EventName> {
   async saveEventData(eventName: EventName, _: number) {
       try {
           await this.updateEventStatsBy(eventName, 1);
-      } catch (error) {
-          console.warn(`Error in saving event data: ${error.message}`);
+      } catch (e) {
+        const _error = e as EventRepositoryError;
+        console.warn(_error);
       }
   }
 
