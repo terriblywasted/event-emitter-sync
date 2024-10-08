@@ -4,7 +4,7 @@ import { EventEmitter } from "./emitter";
 import { EventDelayedRepository } from "./event-repository";
 import { EventStatistics } from "./event-statistics";
 import { ResultsTester } from "./results-tester";
-import { triggerRandomly } from "./utils";
+import { awaitTimeout, triggerRandomly } from "./utils";
 
 const MAX_EVENTS = 1000;
 
@@ -59,30 +59,55 @@ function init() {
 */
 
 class EventHandler extends EventStatistics<EventName> {
-  // Feel free to edit this class
-
   repository: EventRepository;
+  intervalRequest: NodeJS.Timeout;
 
   constructor(emitter: EventEmitter<EventName>, repository: EventRepository) {
     super();
     this.repository = repository;
 
-    emitter.subscribe(EventName.EventA, () =>
-      this.repository.saveEventData(EventName.EventA, 1)
-    );
+    EVENT_NAMES.forEach(eventName => {
+      emitter.subscribe(eventName, this.handleEvent(eventName));
+    });
+
+    this.intervalRequest = setInterval(this.throttle(() => this.syncWithRepository(), 1000))
+  }
+
+  private handleEvent(eventName: EventName) {
+    return () => {
+      this.setStats(eventName, this.getStats(eventName) + 1);
+    };
+  }
+
+  private throttle<T extends (...args: any[]) => void>(callback: T, time: number): (...args: Parameters<T>) => void {
+    let lastCall = 0;
+    
+    return (...args: Parameters<T>) => {
+      const now = Date.now();
+      if (now - lastCall >= time) {
+        lastCall = now;
+        callback(...args);
+      }
+    };
+  }
+
+  private async syncWithRepository() {
+    for (const eventName of EVENT_NAMES) {
+      await awaitTimeout(300);
+      this.repository.syncWithRepository(eventName, this.getStats(eventName)).catch((error) => {
+        console.error(error);
+      })
+      if (this.getStats(eventName) >= MAX_EVENTS) {
+        clearInterval(this.intervalRequest);
+      }
+    }
   }
 }
 
 class EventRepository extends EventDelayedRepository<EventName> {
-  // Feel free to edit this class
-
-  async saveEventData(eventName: EventName, _: number) {
-    try {
-      await this.updateEventStatsBy(eventName, 1);
-    } catch (e) {
-      // const _error = e as EventRepositoryError;
-      // console.warn(error);
-    }
+  async syncWithRepository(eventName: EventName, by: number) {
+    const count = by - this.getStats(eventName)
+    return this.updateEventStatsBy(eventName, count);
   }
 }
 
