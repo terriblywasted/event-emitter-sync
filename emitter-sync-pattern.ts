@@ -1,10 +1,10 @@
 /* Check the comments first */
 
-import { EventEmitter } from "./emitter";
-import { EventDelayedRepository } from "./event-repository";
-import { EventStatistics } from "./event-statistics";
-import { ResultsTester } from "./results-tester";
-import { triggerRandomly } from "./utils";
+import {EventEmitter} from "./emitter";
+import {EventDelayedRepository, EventRepositoryError} from "./event-repository";
+import {EventStatistics} from "./event-statistics";
+import {ResultsTester} from "./results-tester";
+import {triggerRandomly} from "./utils";
 
 const MAX_EVENTS = 1000;
 
@@ -67,21 +67,31 @@ class EventHandler extends EventStatistics<EventName> {
     super();
     this.repository = repository;
 
-    emitter.subscribe(EventName.EventA, () =>
-      this.repository.saveEventData(EventName.EventA, 1)
-    );
+    EVENT_NAMES.map(event => {
+      emitter.subscribe(event, () => {
+        this.setStats(event, this.getStats(event) + 1);
+        this.repository.saveEventData(event, 1);
+      })
+    })
   }
 }
 
 class EventRepository extends EventDelayedRepository<EventName> {
   // Feel free to edit this class
+  private postponedEvents: Map<EventName, number> = new Map();
 
-  async saveEventData(eventName: EventName, _: number) {
+  async saveEventData(eventName: EventName, by: number) {
+    let eventCount = (this.postponedEvents.get(eventName) ?? 0) + by;
+    this.postponedEvents.delete(eventName);
+
     try {
-      await this.updateEventStatsBy(eventName, 1);
+      await this.updateEventStatsBy(eventName, eventCount);
     } catch (e) {
-      // const _error = e as EventRepositoryError;
-      // console.warn(error);
+      const _error = e as EventRepositoryError;
+
+      if ([EventRepositoryError.TOO_MANY, EventRepositoryError.REQUEST_FAIL].includes(_error)) {
+        this.postponedEvents.set(eventName, eventCount);
+      }
     }
   }
 }
