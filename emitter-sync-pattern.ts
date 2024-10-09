@@ -114,12 +114,29 @@ class EventRepository extends EventDelayedRepository<EventName> {
       await this.updateEventStatsBy(eventName, value);
     } catch (e) {
       const _error = e as EventRepositoryError;
-      console.warn(_error);
+      console.error("Error saving event data:", {
+        eventName,
+        value,
+        message: _error,
+      });
+
+      throw new Error(`Failed to save event data for ${eventName}: ${_error}`);
      }
   }
 
   async updateEventStatsBy(eventName: EventName, value: number) {
-    this.setStats(eventName, this.getStats(eventName) + value);
+    try {
+      this.setStats(eventName, this.getStats(eventName) + value);
+    } catch (e) {
+      const _error = e as EventRepositoryError;
+      console.error("Error updating event stats:", {
+        eventName,
+        value,
+        message: _error,
+      });
+      
+      throw new Error(`Failed to update stats for ${eventName}: ${_error}`);
+    }
   }
 }
 
