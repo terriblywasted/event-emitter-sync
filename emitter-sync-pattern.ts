@@ -1,7 +1,7 @@
 /* Check the comments first */
 
 import { EventEmitter } from "./emitter";
-import { EventDelayedRepository } from "./event-repository";
+import { EventDelayedRepository, EventRepositoryError } from "./event-repository";
 import { EventStatistics } from "./event-statistics";
 import { ResultsTester } from "./results-tester";
 import { triggerRandomly } from "./utils";
@@ -34,7 +34,7 @@ function init() {
     eventNames: EVENT_NAMES,
     emitter,
     handler,
-    repository,
+    repository
   });
   resultsTester.showStats(20);
 }
@@ -59,30 +59,37 @@ function init() {
 */
 
 class EventHandler extends EventStatistics<EventName> {
-  // Feel free to edit this class
-
-  repository: EventRepository;
+  private repository: EventRepository;
 
   constructor(emitter: EventEmitter<EventName>, repository: EventRepository) {
     super();
     this.repository = repository;
 
-    emitter.subscribe(EventName.EventA, () =>
-      this.repository.saveEventData(EventName.EventA, 1)
-    );
+    for (const event of EVENT_NAMES) {
+      emitter.subscribe(event, () => {
+        this.setStats(event, this.getStats(event) + 1);
+
+        this.repository.saveEventData(event, 1).then(() => {
+          this.repository.setStats(event, this.getStats(event));
+        });
+      });
+    }
   }
 }
 
 class EventRepository extends EventDelayedRepository<EventName> {
-  // Feel free to edit this class
-
-  async saveEventData(eventName: EventName, _: number) {
-    try {
-      await this.updateEventStatsBy(eventName, 1);
-    } catch (e) {
-      // const _error = e as EventRepositoryError;
-      // console.warn(error);
-    }
+  async saveEventData(eventName: EventName, counter: number) {
+    this.updateEventStatsBy(eventName, counter).catch((err: EventRepositoryError) => {
+      switch (err) {
+        case EventRepositoryError.REQUEST_FAIL:
+          this.saveEventData(eventName, counter);
+          break;
+        case EventRepositoryError.RESPONSE_FAIL:
+          const diff = this.getStats(eventName) - counter;
+          this.saveEventData(eventName, diff > 0 ? diff : 1);
+          break;
+      }
+    });
   }
 }
 
